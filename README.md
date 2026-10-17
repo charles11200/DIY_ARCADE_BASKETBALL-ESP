@@ -6,6 +6,14 @@ three LED matrix boards show Time, Score and High Score.
 
 Firmware: [`src/main.cpp`](src/main.cpp). PlatformIO config: [`platformio.ini`](platformio.ini).
 
+## Demo video
+
+[![Arcade basketball machine - click to watch the demo](docs/demo-preview.jpg)](docs/demo.mp4)
+
+[`docs/demo.mp4`](docs/demo.mp4) (33 s) shows the finished cabinet: the ball ramp and gate,
+the hoop, and the three scoreboard displays (Time, Score, High Score) on the backboard.
+Click the image, then **View raw** to download or play it.
+
 ## Build and upload
 
 Needs [PlatformIO](https://platformio.org/) (VS Code extension or `pip install platformio`).
