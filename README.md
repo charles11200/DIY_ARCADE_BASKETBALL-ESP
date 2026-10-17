@@ -2,9 +2,12 @@
 
 Coin-operated arcade basketball machine on an ESP32. Coins add credits, the start button
 starts a 2-round game, an ultrasonic sensor counts shots, a servo gate releases the balls, and
-three LED matrix boards show Time, Score and High Score.
+three LED matrix boards show Time, Score and High Score. The ESP32 also runs its own WiFi
+access point with a REST API for the companion app.
 
 Firmware: [`src/main.cpp`](src/main.cpp). PlatformIO config: [`platformio.ini`](platformio.ini).
+Companion app and full API reference:
+[DIY_ARCADE_BASKETBALL-APPLICATION](https://github.com/charles11200/DIY_ARCADE_BASKETBALL-APPLICATION).
 
 ## Demo video
 
@@ -70,10 +73,11 @@ PLAYING -> ROUND_GAP_WAIT (into Round 2) -> PRE_ROUND_LABEL ...
 PLAYING -> GAME_OVER_WAIT -> IDLE_CREDITS
 ```
 
-- 20 PHP per game, deducted when the button is pressed. Coins are accepted in every state.
-- Round 1 is 60 s at +2 per shot. A score of 50 or more is needed to continue.
-- Round 2 is 30 s at +3 per shot, after a 3 s pause. It is the last round.
-- Score carries over between rounds. High score and coin balance are saved in flash.
+- 20 PHP per game by default (editable as peso per credit), deducted when the button is pressed. Coins are accepted in every state.
+- Round 1 is 60 s by default at +2 per shot. A score of 50 or more is needed to continue.
+- Round 2 is 30 s by default at +3 per shot, after a 3 s pause. It is the last round.
+- Score carries over between rounds. High score, coin balance, round durations and peso per credit are saved in flash.
+- Games start only from the physical start button. The API has no start endpoint.
 - The gate is up when idle and down during rounds. It goes back up after each round.
 - Buzzer: a beep on every pre-round phase change, and during the last 3 seconds.
 - A shot counts when the reading is 5 to 35 cm, with a 400 ms cooldown. Scoring only runs in the PLAYING state.
@@ -93,23 +97,47 @@ What the displays show:
 
 All at the top of `src/main.cpp`:
 
-`PESO_PER_GAME=20`, `PULSE_DIVISOR=2`, `PULSE_GAP_MS=180`, `DEBOUNCE_MS=30`, `SHOT_MIN_CM=5`,
+`DEFAULT_PESO_PER_CREDIT=20`, `DEFAULT_ROUND1_SECONDS=60`, `DEFAULT_ROUND2_SECONDS=30`, `PULSE_DIVISOR=2`, `PULSE_GAP_MS=180`, `DEBOUNCE_MS=30`, `SHOT_MIN_CM=5`,
 `SHOT_MAX_CM=35`, `SHOT_COOLDOWN_MS=400`, `SERVO_REST_ANGLE=98`, `SERVO_OPEN_ANGLE=0`,
 `DISPLAY_REFRESH_MS=5000`, `DEEP_REINIT_MS=30000`.
 
 Extra: `SHOT_REARM_ON_CLEAR` (default `false`). Set it to `true` to also require one
 out-of-range reading between shots, so a ball resting in front of the sensor can't keep scoring.
 
-## 6. Code structure
+## 6. WiFi and REST API
+
+The ESP32 starts its own WiFi access point at boot. There is no IP to type in: the phone joins
+this network and the app always talks to `192.168.4.1`.
+
+| WiFi name (SSID) | Password | Machine address |
+|---|---|---|
+| `ArcadeHoops` | `hoops1234` | `http://192.168.4.1` |
+
+| Method | Path | What it does |
+|---|---|---|
+| GET | `/api/status` | Game state, round, score, time left, high score, balance and credits |
+| GET | `/api/sensors` | Health of the coin slot, start button and ultrasonic sensor |
+| GET | `/api/sensors/ultrasonic` | Live distance reading |
+| GET | `/api/sessions/unclaimed` | Finished games not yet on the app's leaderboard |
+| POST | `/api/sessions/claim` | Marks a finished game as claimed |
+| GET / POST | `/api/settings` | Read or change round durations and peso per credit (saved in flash) |
+
+Only two-way parts are monitored, because only they send a signal back: the coin slot, the
+start button and the ultrasonic sensor. The buzzer, servo and displays are output-only.
+Field names, limits and examples are in the
+[APPLICATION repo README](https://github.com/charles11200/DIY_ARCADE_BASKETBALL-APPLICATION#rest-api-esp32-http19216841).
+
+## 7. Code structure
 
 - Each `loop()` pass animates the 3 displays, then runs `handleCoins`, `handleBuzzer`,
-  `handleDisplayWatchdog`, `handleUltrasonicUART`, `debugPrintUltrasonic`, and then the state switch.
+  `handleDisplayWatchdog`, `handleUltrasonicUART`, `debugPrintUltrasonic`, `monitorInputLines`,
+  the state machine, and finally `server.handleClient()` for the REST API.
 - Nothing blocks. All timing uses `millis()`, with no `delay()` in the game.
 - `coinISR` is marked `IRAM_ATTR`. It debounces and counts pulses, and `handleCoins` groups them into one coin value.
 - `handleUltrasonicUART` is a non-blocking parser for `[0xFF][high][low][checksum]` frames.
   The checksum is `(0xFF + high + low) & 0xFF`, and the distance in mm divided by 10 gives cm.
 
-## 7. Lessons learned
+## 8. Lessons learned
 
 - Coin pulses doubled after adding the capacitor, so `PULSE_DIVISOR=2` fixes it in software.
 - `PULSE_GAP_MS` is 180. The measured gap inside one coin is 120 ms. 100 split coins apart and 300 merged separate coins.
@@ -119,7 +147,7 @@ out-of-range reading between shots, so a ball resting in front of the sensor can
 - Display glitches: a full `begin()` every 2 s made the garbage worse. Now a light redraw runs every 5 s and a full re-init every 30 s.
 - Upload error *Wrong boot mode detected*: hold BOOT, tap EN, then release BOOT once the upload starts.
 
-## 8. Troubleshooting the sensor
+## 9. Troubleshooting the sensor
 
 The serial monitor (115200) prints this every 500 ms:
 
@@ -131,5 +159,5 @@ The serial monitor (115200) prints this every 500 ms:
 - `bytesSeen` growing while `validFrames` stays 0: baud mismatch or swapped TX/RX.
 - `validFrames` growing and the distance changing: the sensor works. Shots only score during a round.
 
-Other serial tags: `[COIN]` raw pulses and value per coin, `[STATE]` state changes,
+Other serial tags: `[COIN]` raw pulses and value per coin, `[STATE]` state changes, `[WIFI]` the AP address at boot,
 `[SHOT]` each scored shot, `[GATE]` servo moves, `[DISP]` deep re-inits.
